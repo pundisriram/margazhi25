@@ -13,7 +13,7 @@ load_dotenv()
 class GeminiChat:
     """Handles Gemini AI interactions for natural language understanding."""
     
-    def __init__(self, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         """Initialize Gemini model."""
         api_key = os.getenv('GEMINI_API_KEY')
         if not api_key:
