@@ -13,7 +13,7 @@ load_dotenv()
 class GeminiChat:
     """Handles Gemini AI interactions for natural language understanding."""
     
-    def __init__(self, model_name: str = "gemini-pro"):
+    def __init__(self, model_name: str = "gemini-1.5-flash"):
         """Initialize Gemini model."""
         api_key = os.getenv('GEMINI_API_KEY')
         if not api_key:
@@ -327,7 +327,7 @@ Now extract from the user query above:"""
         # Extract ticketed status
         if any(word in query_lower for word in ['free', 'no ticket', 'no charge', 'complimentary']):
             result["ticketed"] = "Free"
-        elif any(word in query_lower for word in ['ticketed', 'paid', 'ticket', 'tickets', 'yes']):
+        elif any(word in query_lower for word in ['ticketed', 'paid', 'ticket', 'tickets']):
             result["ticketed"] = "Ticketed"
         
         # Extract time of day (use word boundaries to avoid false matches like "am" in "subramaniam")
