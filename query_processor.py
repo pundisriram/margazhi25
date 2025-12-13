@@ -518,16 +518,21 @@ class QueryProcessor:
             start_date, end_date = date_range
             result["date_range"] = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
         else:
-            # Handle relative dates
-            relative_date = parse_relative_date(user_query)
-            if relative_date:
-                result["date"] = relative_date.strftime('%Y-%m-%d')
-            elif 'today' in query_lower:
-                result["date"] = datetime.now().strftime('%Y-%m-%d')
-            elif 'tomorrow' in query_lower:
-                result["date"] = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-            elif 'yesterday' in query_lower:
-                result["date"] = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            # Special case: "next week" should be kept as-is (not converted to date string)
+            # so that search_by_date can handle it as a date range
+            if 'next week' in query_lower:
+                result["date"] = "next week"
+            else:
+                # Handle relative dates
+                relative_date = parse_relative_date(user_query)
+                if relative_date:
+                    result["date"] = relative_date.strftime('%Y-%m-%d')
+                elif 'today' in query_lower:
+                    result["date"] = datetime.now().strftime('%Y-%m-%d')
+                elif 'tomorrow' in query_lower:
+                    result["date"] = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                elif 'yesterday' in query_lower:
+                    result["date"] = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         
         # Extract ticketed status
         if any(word in query_lower for word in ['free', 'no ticket', 'no charge', 'complimentary']):

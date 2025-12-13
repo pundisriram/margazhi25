@@ -97,6 +97,20 @@ class ConcertDataLoader:
         from datetime import datetime, timedelta
         from date_utils import parse_relative_date, parse_date_range, get_weekend_dates
         
+        # Special handling for "next week" - convert to date range
+        date_lower = date.lower().strip()
+        if date_lower == 'next week':
+            reference_date = datetime.now()
+            # Find next Monday (start of next week)
+            days_until_monday = (7 - reference_date.weekday()) % 7
+            if days_until_monday == 0:
+                days_until_monday = 7  # If today is Monday, get next Monday
+            next_monday = (reference_date + timedelta(days=days_until_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+            # End of next week is next Sunday
+            next_sunday = next_monday + timedelta(days=6)
+            result = self.df[(self.df['Date'] >= next_monday) & (self.df['Date'] <= next_sunday)]
+            return result.sort_values(['Date', 'TimeParsed']).copy()
+        
         # Try parsing as date range first
         date_range = parse_date_range(date)
         if date_range:
