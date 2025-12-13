@@ -8,7 +8,7 @@ try:
     from data_loader import ConcertDataLoader
     st.success("Data loader imported successfully")
     
-    loader = ConcertDataLoader("combined_schedules.csv")
+    loader = ConcertDataLoader("2025_Margazhi_schedule_cleaned.txt")
     st.success(f"Data loaded: {len(loader.df)} rows")
 except Exception as e:
     st.error(f"Error: {e}")

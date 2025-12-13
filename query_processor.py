@@ -36,7 +36,11 @@ class QueryProcessor:
             - 'query_params': extracted query parameters
         """
         # Extract query intent and parameters
-        query_params = self.gemini_chat.extract_query_intent(user_query)
+        if self.gemini_chat:
+            query_params = self.gemini_chat.extract_query_intent(user_query)
+        else:
+            # Fallback extraction when Gemini is unavailable
+            query_params = self._fallback_extract_query_intent(user_query)
         intent = query_params.get('intent', 'search')
         
         # Execute search based on intent
@@ -135,13 +139,13 @@ class QueryProcessor:
                         results_df = results_df[results_df['Ticketed'] == 'Free']
                     elif filters['ticketed'] == 'Ticketed':
                         results_df = results_df[results_df['Ticketed'] == 'Ticketed']
-                elif filter_type == 'ticketed' and 'Ticketed' in results_df.columns:
-                    # Auto-detect from query if not explicitly extracted
-                    query_lower = user_query.lower()
-                    if 'free' in query_lower:
-                        results_df = results_df[results_df['Ticketed'] == 'Free']
-                    elif 'ticketed' in query_lower or 'paid' in query_lower:
-                        results_df = results_df[results_df['Ticketed'] == 'Ticketed']
+            elif filter_type == 'ticketed' and len(results_df) > 0 and 'Ticketed' in results_df.columns:
+                # Auto-detect from query if not explicitly extracted
+                query_lower = user_query.lower()
+                if 'free' in query_lower:
+                    results_df = results_df[results_df['Ticketed'] == 'Free']
+                elif 'ticketed' in query_lower or 'paid' in query_lower:
+                    results_df = results_df[results_df['Ticketed'] == 'Ticketed']
         else:
             # Execute search on full dataset
             # If query looks like an artist name, prioritize artist search
@@ -250,7 +254,11 @@ class QueryProcessor:
             'venues': venues[:20]  # Sample venues
         }
         
-        response = self.gemini_chat.process_query(user_query, context)
+        if self.gemini_chat:
+            response = self.gemini_chat.process_query(user_query, context)
+        else:
+            # Fallback response when Gemini is unavailable
+            response = f"I can help you search for concerts. The database contains {context['total_concerts']} concerts from {context['date_range']}. Try asking about specific artists, dates, or venues."
         
         return {
             'intent': 'info',
@@ -368,12 +376,13 @@ class QueryProcessor:
                     
                     results = df[artist_mask].sort_values(['Date', 'TimeParsed']).copy()
                     return results
-                else:
+                elif len(words) == 1:
                     # Single word: use word boundary
                     pattern = r'\b' + re.escape(words[0]) + r'\b'
                     artist_mask = df['Artist(s)'].astype(str).str.lower().str.contains(pattern, na=False, regex=True)
                     results = df[artist_mask].sort_values(['Date', 'TimeParsed']).copy()
                     return results
+                # If words is empty (all filtered out), fall through to general search
             
             # General text search across multiple columns (but exclude Instruments/Details)
             mask = pd.Series([False] * len(df))
@@ -469,6 +478,82 @@ class QueryProcessor:
             return results
         
         return pd.DataFrame()
+    
+    def _fallback_extract_query_intent(self, user_query: str) -> Dict[str, Any]:
+        """
+        Fallback query intent extraction when Gemini is unavailable.
+        Uses simple keyword matching similar to GeminiChat._fallback_extraction.
+        
+        Args:
+            user_query: Natural language query from user
+        
+        Returns:
+            Dictionary with extracted query parameters
+        """
+        import re
+        from datetime import datetime, timedelta
+        from date_utils import parse_relative_date, parse_date_range
+        
+        query_lower = user_query.lower()
+        result = {
+            "date": None,
+            "date_range": None,
+            "artist": None,
+            "venue": None,
+            "location": None,
+            "time_of_day": None,
+            "ticketed": None,
+            "intent": "search",
+            "is_followup": False
+        }
+        
+        # Check for follow-up indicators
+        followup_keywords = ['filter', 'only', 'just', 'those', 'these', 'the ones', 'them', 'show me', 'which']
+        if any(keyword in query_lower for keyword in followup_keywords):
+            result["is_followup"] = True
+        
+        # Try to extract date range first
+        date_range = parse_date_range(user_query)
+        if date_range:
+            start_date, end_date = date_range
+            result["date_range"] = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
+        else:
+            # Handle relative dates
+            relative_date = parse_relative_date(user_query)
+            if relative_date:
+                result["date"] = relative_date.strftime('%Y-%m-%d')
+            elif 'today' in query_lower:
+                result["date"] = datetime.now().strftime('%Y-%m-%d')
+            elif 'tomorrow' in query_lower:
+                result["date"] = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            elif 'yesterday' in query_lower:
+                result["date"] = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # Extract ticketed status
+        if any(word in query_lower for word in ['free', 'no ticket', 'no charge', 'complimentary']):
+            result["ticketed"] = "Free"
+        elif any(word in query_lower for word in ['ticketed', 'paid', 'ticket', 'tickets']):
+            result["ticketed"] = "Ticketed"
+        
+        # Extract time of day (use word boundaries to avoid false matches)
+        if re.search(r'\bmorning\b', query_lower) or re.search(r'\bam\b', query_lower) or re.search(r'\bearly\b', query_lower):
+            result["time_of_day"] = "morning"
+        elif re.search(r'\bafternoon\b', query_lower) or re.search(r'\bpm\b', query_lower):
+            result["time_of_day"] = "afternoon"
+        elif re.search(r'\bevening\b', query_lower):
+            result["time_of_day"] = "evening"
+        elif re.search(r'\bnight\b', query_lower) or re.search(r'\blate\b', query_lower):
+            result["time_of_day"] = "night"
+        
+        # Extract intent
+        if any(word in query_lower for word in ['route', 'plan', 'directions', 'travel']):
+            result["intent"] = "route_planning"
+        elif any(word in query_lower for word in ['help', 'what can', 'how can']):
+            result["intent"] = "help"
+        elif any(word in query_lower for word in ['info', 'information', 'tell me about']):
+            result["intent"] = "info"
+        
+        return result
     
     def _detect_followup_intent(self, user_query: str) -> str:
         """

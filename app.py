@@ -49,7 +49,7 @@ if 'previous_filters' not in st.session_state:
 def initialize_components():
     """Initialize all components."""
     try:
-        data_loader = ConcertDataLoader("combined_schedules.csv")
+        data_loader = ConcertDataLoader("2025_Margazhi_schedule_cleaned.txt")
         geocoder = VenueGeocoder()
         
         try:
@@ -58,7 +58,8 @@ def initialize_components():
             print(f"Warning: Error initializing Gemini: {e}")
             gemini_chat = None
         
-        query_processor = QueryProcessor(data_loader, gemini_chat) if gemini_chat else None
+        # Always create QueryProcessor, even if gemini_chat is None (fallback search will still work)
+        query_processor = QueryProcessor(data_loader, gemini_chat)
         route_planner = RoutePlanner(geocoder, data_loader)
         
         return data_loader, geocoder, gemini_chat, query_processor, route_planner
@@ -80,14 +81,31 @@ def display_concert_results(results_df: pd.DataFrame, concerts: list):
     
     # Create a formatted display
     try:
-        # Include Instruments/Details column
-        columns_to_show = ['Date', 'Time', 'Artist(s)', 'Instruments/Details', 'Venue', 'Source']
+        # Ensure we have both Sabha/Venue and Hall columns
+        results_df = results_df.copy()
+        
+        # Map Sabha to Venue if needed, but keep both if they exist
+        if 'Sabha' in results_df.columns and 'Venue' not in results_df.columns:
+            results_df['Venue'] = results_df['Sabha']
+        elif 'Venue' in results_df.columns and 'Sabha' not in results_df.columns:
+            results_df['Sabha'] = results_df['Venue']
+        
+        # Include Venue (from Sabha) and Hall as separate columns
+        columns_to_show = ['Date', 'Time', 'Artist(s)', 'Instruments/Details', 'Venue', 'Hall', 'Ticketed']
+        
         # Check which columns exist
         available_columns = [col for col in columns_to_show if col in results_df.columns]
         display_df = results_df[available_columns].copy()
+        
+        # Format date
         display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d')
-    except KeyError as e:
-        st.error(f"Error displaying results: Missing column {e}")
+        
+        # Ensure Hall column is shown even if empty or missing
+        if 'Hall' not in display_df.columns:
+            # Add empty Hall column if it doesn't exist in the data
+            display_df['Hall'] = ''
+    except (KeyError, ValueError) as e:
+        st.error(f"Error displaying results: {e}")
         return
     
     # Display table
@@ -183,7 +201,7 @@ def main():
             progress_bar.progress(60)
             
             if data_loader is None:
-                init_placeholder.error("Failed to load data. Please check that combined_schedules.csv exists.")
+                init_placeholder.error("Failed to load data. Please check that 2025_Margazhi_schedule_cleaned.txt exists.")
                 st.stop()
             
             status_text.text(f"✓ Loaded {len(data_loader.df)} concerts")
@@ -211,7 +229,7 @@ def main():
     # Check if initialization was successful
     if st.session_state.data_loader is None:
         st.error("Failed to initialize. Please check your data file and API keys.")
-        st.info("Make sure combined_schedules.csv exists in the project directory.")
+        st.info("Make sure 2025_Margazhi_schedule_cleaned.txt exists in the project directory.")
         return
     
     if st.session_state.gemini_chat is None:
@@ -282,7 +300,19 @@ def main():
                             results_df = st.session_state.query_processor.search_by_text(prompt)
                             if len(results_df) > 0:
                                 st.success(f"Found {len(results_df)} concert(s) using text search")
-                                display_df = results_df[['Date', 'Time', 'Artist(s)', 'Venue', 'Source']].head(20)
+                                # Show Venue and Hall as separate columns
+                                results_df = results_df.copy()
+                                if 'Sabha' in results_df.columns and 'Venue' not in results_df.columns:
+                                    results_df['Venue'] = results_df['Sabha']
+                                
+                                display_cols = ['Date', 'Time', 'Artist(s)']
+                                if 'Venue' in results_df.columns:
+                                    display_cols.append('Venue')
+                                if 'Hall' in results_df.columns:
+                                    display_cols.append('Hall')
+                                if 'Source' in results_df.columns:
+                                    display_cols.append('Source')
+                                display_df = results_df[display_cols].head(20).copy()
                                 st.dataframe(display_df, use_container_width=True)
                 else:
                     # Fallback: simple text search using data loader
@@ -300,7 +330,19 @@ def main():
                     
                     if len(results_df) > 0:
                         st.success(f"Found {len(results_df)} concert(s)")
-                        display_df = results_df[['Date', 'Time', 'Artist(s)', 'Venue', 'Source']].head(20)
+                        # Show Venue and Hall as separate columns
+                        results_df = results_df.copy()
+                        if 'Sabha' in results_df.columns and 'Venue' not in results_df.columns:
+                            results_df['Venue'] = results_df['Sabha']
+                        
+                        display_cols = ['Date', 'Time', 'Artist(s)']
+                        if 'Venue' in results_df.columns:
+                            display_cols.append('Venue')
+                        if 'Hall' in results_df.columns:
+                            display_cols.append('Hall')
+                        if 'Source' in results_df.columns:
+                            display_cols.append('Source')
+                        display_df = results_df[display_cols].head(20).copy()
                         st.dataframe(display_df, use_container_width=True)
                     else:
                         st.info("No concerts found. Please try a different search term or ensure Gemini API is configured for better search.")
