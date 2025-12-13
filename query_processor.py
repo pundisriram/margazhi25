@@ -72,34 +72,25 @@ class QueryProcessor:
         if query_params.get('time_of_day'):
             filters['time_of_day'] = query_params['time_of_day']
         
-        # If no structured filters but query seems to be about an artist, try artist search first
-        if not filters and not previous_results:
-            # Check if query contains artist-like patterns (singing, performing, etc.)
-            import re
+        # Handle ticketed status filter
+        if query_params.get('ticketed'):
+            filters['ticketed'] = query_params['ticketed']
+        
+        # Detect if this is a follow-up query (even if not explicitly marked)
+        is_followup = query_params.get('is_followup', False)
+        if previous_results is not None and len(previous_results) > 0:
+            # Check if query seems to be filtering previous results
             query_lower = user_query.lower()
-            is_artist_query = any(word in query_lower for word in ['singing', 'performing', 'concert by', 'by'])
-            
-            if is_artist_query:
-                # Try to extract artist name using fallback extraction
-                if self.gemini_chat:
-                    extracted = self.gemini_chat._fallback_extraction(user_query, self.data_loader)
-                    if extracted.get('artist'):
-                        # Try artist search with extracted name
-                        artist_results = self.data_loader.search_by_artist(extracted['artist'])
-                        if len(artist_results) > 0:
-                            filters['artist'] = extracted['artist']
-                        else:
-                            # Try with just the first word if it's a common name
-                            words = extracted['artist'].split()
-                            if len(words) > 0:
-                                first_word = words[0]
-                                artist_results = self.data_loader.search_by_artist(first_word)
-                                if len(artist_results) > 0:
-                                    filters['artist'] = first_word
+            followup_indicators = ['only', 'just', 'those', 'these', 'the ones', 'them', 'which', 'filter', 'show me']
+            if any(indicator in query_lower for indicator in followup_indicators):
+                is_followup = True
         
         # If we have previous results and this is a follow-up, filter previous results
-        if previous_results is not None and query_params.get('is_followup', False):
+        if previous_results is not None and is_followup:
             results_df = previous_results.copy()
+            
+            # Detect what type of filter is being applied
+            filter_type = self._detect_followup_intent(user_query)
             
             # Apply new filters to previous results
             if filters.get('date'):
@@ -136,14 +127,75 @@ class QueryProcessor:
                     results_df = results_df[results_df.index.isin(time_results.index)]
                 else:
                     results_df = pd.DataFrame()
+            
+            # Handle ticketed status filtering on previous results
+            if filters.get('ticketed') and len(results_df) > 0:
+                if 'Ticketed' in results_df.columns:
+                    if filters['ticketed'] == 'Free':
+                        results_df = results_df[results_df['Ticketed'] == 'Free']
+                    elif filters['ticketed'] == 'Ticketed':
+                        results_df = results_df[results_df['Ticketed'] == 'Ticketed']
+                elif filter_type == 'ticketed' and 'Ticketed' in results_df.columns:
+                    # Auto-detect from query if not explicitly extracted
+                    query_lower = user_query.lower()
+                    if 'free' in query_lower:
+                        results_df = results_df[results_df['Ticketed'] == 'Free']
+                    elif 'ticketed' in query_lower or 'paid' in query_lower:
+                        results_df = results_df[results_df['Ticketed'] == 'Ticketed']
         else:
             # Execute search on full dataset
-            if filters:
+            # If query looks like an artist name, prioritize artist search
+            query_lower = user_query.lower()
+            words = [w.strip() for w in query_lower.split() if len(w.strip()) > 2]
+            original_words = user_query.split()
+            has_capitalized = any(w and len(w) > 0 and w[0].isupper() for w in original_words)
+            import re
+            location_keywords = ['at', 'on', 'in', 'the', 'and', 'or', 'venue', 'hall', 'sabha', 'academy']
+            has_location_keyword = any(
+                re.search(r'\b' + re.escape(keyword) + r'\b', query_lower) 
+                for keyword in location_keywords
+            )
+            looks_like_artist_name = (
+                len(words) >= 2 and
+                not has_location_keyword and
+                ('-' in user_query or has_capitalized)
+            )
+            
+            # If it looks like an artist name but no artist was extracted, try text search first
+            if looks_like_artist_name and not filters.get('artist'):
+                results_df = self.search_by_text(user_query)
+                # Then apply other filters if any
+                if len(results_df) > 0 and filters:
+                    # Remove artist from filters since we already searched by artist
+                    other_filters = {k: v for k, v in filters.items() if k != 'artist'}
+                    if other_filters:
+                        # Apply other filters to the artist results
+                        for filter_key, filter_value in other_filters.items():
+                            if filter_key == 'time_of_day':
+                                time_results = self.data_loader.search_by_time_of_day(filter_value)
+                                if len(time_results) > 0:
+                                    results_df = results_df[results_df.index.isin(time_results.index)]
+                                else:
+                                    results_df = pd.DataFrame()
+                            elif filter_key == 'ticketed' and 'Ticketed' in results_df.columns:
+                                if filter_value == 'Free':
+                                    results_df = results_df[results_df['Ticketed'] == 'Free']
+                                elif filter_value == 'Ticketed':
+                                    results_df = results_df[results_df['Ticketed'] == 'Ticketed']
+            elif filters:
                 results_df = self.data_loader.combine_filters(filters)
             else:
                 # If no specific filters, try to search by any text in the query
                 # This is a fallback for unclear queries
                 results_df = self.search_by_text(user_query)
+            
+            # Apply ticketed filter if specified
+            if filters.get('ticketed') and len(results_df) > 0:
+                if 'Ticketed' in results_df.columns:
+                    if filters['ticketed'] == 'Free':
+                        results_df = results_df[results_df['Ticketed'] == 'Free']
+                    elif filters['ticketed'] == 'Ticketed':
+                        results_df = results_df[results_df['Ticketed'] == 'Ticketed']
         
         # Convert to list of dictionaries for easier handling
         concerts = results_df.to_dict('records') if len(results_df) > 0 else []
@@ -152,7 +204,8 @@ class QueryProcessor:
         if self.gemini_chat:
             response = self.gemini_chat.generate_natural_response({
                 'count': len(concerts),
-                'concerts': concerts[:20]  # Limit to 20 for response generation
+                'concerts': concerts[:20],  # Limit to 20 for response generation
+                'query_params': query_params
             }, user_query)
         else:
             # Fallback response without Gemini
@@ -211,6 +264,7 @@ class QueryProcessor:
     def search_by_text(self, text: str) -> pd.DataFrame:
         """
         Smart text search that searches across all text fields and tries to extract structured components.
+        Uses tiered matching strategy for artist names to prevent false positives.
         
         Args:
             text: Text to search for
@@ -245,43 +299,204 @@ class QueryProcessor:
                 if filters:
                     return self.data_loader.combine_filters(filters)
         
-        # Fallback: smart text search - prioritize Artist column for artist-like queries
+        # Check if query seems to be about an artist
+        import re
+        is_artist_query = any(word in text_lower for word in [
+            'singing', 'performing', 'concert by', 'by', 'when is', 'where is', 'who is',
+            'concerts', "'s concerts", 'artist', 'vocalist'
+        ])
+        
+        # Detect if query looks like an artist name (two or more words, possibly hyphenated)
+        # This helps catch queries like "Ranjani gayatri" even without explicit keywords
+        words = [w.strip() for w in text_lower.split() if len(w.strip()) > 2]
+        # Check if original text has capitalized words (preserve original case)
+        original_words = text.split()
+        has_capitalized = any(w and len(w) > 0 and w[0].isupper() for w in original_words)
+        
+        # Check for location/venue keywords as whole words (not substrings)
+        import re
+        location_keywords = ['at', 'on', 'in', 'the', 'and', 'or', 'venue', 'hall', 'sabha', 'academy']
+        has_location_keyword = any(
+            re.search(r'\b' + re.escape(keyword) + r'\b', text_lower) 
+            for keyword in location_keywords
+        )
+        
+        looks_like_artist_name = (
+            len(words) >= 2 and  # At least 2 words
+            not has_location_keyword and  # Not a location/venue query
+            ('-' in text or has_capitalized)  # Has hyphen or capitalized words
+        )
+        
+        # If it looks like an artist name OR has artist keywords, use tiered matching
+        if is_artist_query or looks_like_artist_name:
+            # Tier 1: Try exact phrase matching
+            exact_results = self._match_artist_name_exact(df, text)
+            if len(exact_results) > 0:
+                return exact_results
+            
+            # Tier 2: Word boundary matching with AND logic (all words must match)
+            word_results = self._match_artist_name_words(df, text)
+            if len(word_results) > 0:
+                return word_results
+        
+        # Fallback: general text search
         try:
-            # Check if query seems to be about an artist (contains "singing", "performing", "by", etc.)
-            import re
-            is_artist_query = any(word in text_lower for word in ['singing', 'performing', 'concert by', 'by', 'when is', 'where is', 'who is'])
-            
-            # Split text into words for better matching
-            words = [w for w in text_lower.split() if len(w) > 2]  # Filter short words
-            
-            if is_artist_query and words:
-                # For artist queries, ONLY search in Artist column - NEVER search Instruments/Details
-                # This prevents matching "Sanjay Suresh" (violinist) when searching for "Sanjay" (vocalist)
-                artist_mask = pd.Series([False] * len(df))
+            # For multi-word queries that could be artist names, always use AND logic in Artist column
+            # This handles cases like "sanjay subramaniam" even if detection didn't trigger
+            if len(words) > 1 and not has_location_keyword:
+                # Multi-word query: use AND logic with word boundaries in Artist column only
+                artist_mask = pd.Series([True] * len(df))
                 for word in words:
-                    artist_mask = artist_mask | df['Artist(s)'].astype(str).str.lower().str.contains(word, na=False, regex=False)
+                    # Use word boundary to prevent substring matches
+                    pattern = r'\b' + re.escape(word) + r'\b'
+                    word_mask = df['Artist(s)'].astype(str).str.lower().str.contains(pattern, na=False, regex=True)
+                    artist_mask = artist_mask & word_mask
                 
-                # Return only Artist column matches
                 results = df[artist_mask].sort_values(['Date', 'TimeParsed']).copy()
-                return results
+                if len(results) > 0:
+                    return results
             
-            # General text search across multiple columns (but exclude Instruments/Details for artist queries)
+            if is_artist_query or looks_like_artist_name:
+                # For artist queries, ONLY search in Artist column with AND logic for multi-word
+                if len(words) > 1:
+                    # Multi-word: use AND logic with word boundaries (all words must appear)
+                    artist_mask = pd.Series([True] * len(df))
+                    for word in words:
+                        pattern = r'\b' + re.escape(word) + r'\b'
+                        word_mask = df['Artist(s)'].astype(str).str.lower().str.contains(pattern, na=False, regex=True)
+                        artist_mask = artist_mask & word_mask
+                    
+                    results = df[artist_mask].sort_values(['Date', 'TimeParsed']).copy()
+                    return results
+                else:
+                    # Single word: use word boundary
+                    pattern = r'\b' + re.escape(words[0]) + r'\b'
+                    artist_mask = df['Artist(s)'].astype(str).str.lower().str.contains(pattern, na=False, regex=True)
+                    results = df[artist_mask].sort_values(['Date', 'TimeParsed']).copy()
+                    return results
+            
+            # General text search across multiple columns (but exclude Instruments/Details)
             mask = pd.Series([False] * len(df))
             for word in words:
-                if is_artist_query:
-                    # For artist queries, ONLY search Artist column (not Instruments/Details)
-                    word_mask = df['Artist(s)'].astype(str).str.lower().str.contains(word, na=False, regex=False)
-                else:
-                    # For general queries, search Artist, Venue, but NOT Instruments/Details
-                    # (Instruments/Details often contains accompanist names which cause false matches)
-                    word_mask = (
-                        df['Artist(s)'].astype(str).str.lower().str.contains(word, na=False, regex=False) |
-                        df['Venue'].astype(str).str.lower().str.contains(word, na=False, regex=False)
-                    )
+                # For general queries, search Artist, Venue, but NOT Instruments/Details
+                word_mask = (
+                    df['Artist(s)'].astype(str).str.lower().str.contains(word, na=False, regex=False) |
+                    df['Venue'].astype(str).str.lower().str.contains(word, na=False, regex=False)
+                )
                 mask = mask | word_mask
             
             return df[mask].sort_values(['Date', 'TimeParsed']).copy()
         except Exception as e:
             print(f"Error in search_by_text: {e}")
             return pd.DataFrame()
+    
+    def _normalize_name_separators(self, name: str) -> str:
+        """Normalize name separators (hyphen, &, space) for matching."""
+        import re
+        # Replace hyphens and "&" with spaces, then normalize whitespace
+        normalized = re.sub(r'[-&]', ' ', name)
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return normalized.lower()
+    
+    def _match_artist_name_exact(self, df: pd.DataFrame, query: str) -> pd.DataFrame:
+        """Try to match artist name as exact phrase (highest priority)."""
+        import re
+        
+        query_normalized = self._normalize_name_separators(query)
+        
+        # Handle spelling variations in query
+        def normalize_with_variations(text):
+            """Normalize text and handle common spelling variations."""
+            normalized = self._normalize_name_separators(text)
+            # Handle Gayatri/Gayathri variation
+            normalized = re.sub(r'\bgayathri\b', 'gayatri', normalized)
+            return normalized
+        
+        query_normalized_variations = normalize_with_variations(query)
+        
+        # Try exact phrase match (normalized, with spelling variations)
+        def matches_exact(artist_str):
+            if pd.isna(artist_str):
+                return False
+            artist_normalized = normalize_with_variations(str(artist_str))
+            query_variations = normalize_with_variations(query_normalized)
+            return query_variations in artist_normalized or artist_normalized in query_variations
+        
+        mask = df['Artist(s)'].apply(matches_exact)
+        results = df[mask].sort_values(['Date', 'TimeParsed']).copy()
+        return results
+    
+    def _match_artist_name_words(self, df: pd.DataFrame, query: str) -> pd.DataFrame:
+        """Match artist name using word boundaries with AND logic (all words must match)."""
+        import re
+        
+        # Normalize and split into words
+        query_normalized = self._normalize_name_separators(query)
+        words = [w.strip() for w in query_normalized.split() if len(w.strip()) > 2]
+        
+        if not words:
+            return pd.DataFrame()
+        
+        # Handle common spelling variations
+        def get_word_variations(word):
+            """Get spelling variations of a word."""
+            variations = [word]
+            # Handle Gayatri/Gayathri variation
+            if word == 'gayatri':
+                variations.append('gayathri')
+            elif word == 'gayathri':
+                variations.append('gayatri')
+            return variations
+        
+        # For each word, create word boundary regex patterns with variations
+        masks = []
+        for word in words:
+            variations = get_word_variations(word)
+            # Create pattern that matches any variation with word boundaries
+            patterns = [r'\b' + re.escape(var) + r'\b' for var in variations]
+            pattern = '|'.join(patterns)
+            
+            word_mask = df['Artist(s)'].astype(str).str.lower().str.contains(pattern, na=False, regex=True)
+            masks.append(word_mask)
+        
+        # Combine with AND logic (all words must match)
+        if masks:
+            combined_mask = masks[0]
+            for mask in masks[1:]:
+                combined_mask = combined_mask & mask
+            
+            results = df[combined_mask].sort_values(['Date', 'TimeParsed']).copy()
+            return results
+        
+        return pd.DataFrame()
+    
+    def _detect_followup_intent(self, user_query: str) -> str:
+        """
+        Detect what type of filter is being applied in a follow-up query.
+        
+        Args:
+            user_query: The follow-up query
+        
+        Returns:
+            Type of filter: 'ticketed', 'time', 'venue', 'date', or 'unknown'
+        """
+        query_lower = user_query.lower()
+        
+        # Check for ticketed status
+        if any(word in query_lower for word in ['free', 'ticketed', 'paid', 'ticket']):
+            return 'ticketed'
+        
+        # Check for time of day
+        if any(word in query_lower for word in ['morning', 'afternoon', 'evening', 'night', 'am', 'pm']):
+            return 'time'
+        
+        # Check for venue
+        if any(word in query_lower for word in ['at', 'venue', 'hall', 'sabha', 'academy']):
+            return 'venue'
+        
+        # Check for date
+        if any(word in query_lower for word in ['tomorrow', 'today', 'weekend', 'friday', 'monday', 'date']):
+            return 'date'
+        
+        return 'unknown'
 
