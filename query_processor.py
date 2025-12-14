@@ -175,7 +175,20 @@ class QueryProcessor:
                     if other_filters:
                         # Apply other filters to the artist results
                         for filter_key, filter_value in other_filters.items():
-                            if filter_key == 'time_of_day':
+                            if filter_key == 'date':
+                                date_results = self.data_loader.search_by_date(filter_value)
+                                if len(date_results) > 0:
+                                    results_df = results_df[results_df.index.isin(date_results.index)]
+                                else:
+                                    results_df = pd.DataFrame()
+                            elif filter_key == 'date_range':
+                                start, end = filter_value
+                                range_results = self.data_loader.search_by_date_range(start, end)
+                                if len(range_results) > 0:
+                                    results_df = results_df[results_df.index.isin(range_results.index)]
+                                else:
+                                    results_df = pd.DataFrame()
+                            elif filter_key == 'time_of_day':
                                 time_results = self.data_loader.search_by_time_of_day(filter_value)
                                 if len(time_results) > 0:
                                     results_df = results_df[results_df.index.isin(time_results.index)]
@@ -291,10 +304,12 @@ class QueryProcessor:
             extracted = self.gemini_chat._fallback_extraction(text, self.data_loader)
             
             # If we extracted structured components, use them
-            if extracted.get('date') or extracted.get('artist') or extracted.get('venue'):
+            if extracted.get('date') or extracted.get('date_range') or extracted.get('artist') or extracted.get('venue'):
                 filters = {}
                 if extracted.get('date'):
                     filters['date'] = extracted['date']
+                if extracted.get('date_range'):
+                    filters['date_range'] = extracted['date_range']
                 if extracted.get('artist'):
                     filters['artist'] = extracted['artist']
                 if extracted.get('venue'):
