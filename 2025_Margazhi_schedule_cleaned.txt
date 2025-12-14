@@ -120,7 +120,6 @@ Date	Time	Artist(s)	Instruments/Details	Ticketed	Sabha	Hall
 29-Dec-2025	12:30 PM	Sowmya Acharya		Free	TTV Trust	Tattvaloka Auditorium, Teynampet
 01-Jan-2026	6:00 PM	Sowmya Acharya		Free	Brahma Gana Sabha	RR Sabha Hall, Mylapore
 13-Dec-2025	6:30 PM	Sanjay Subramanian	Vocal; Vani Kala Sudhakara S.Varadarajan (Violin); Vani Kala Sudhakara Neyveli Venkatesh (Mrudangam); S. Venkataramanan (Kanjira)	Ticketed	Thyaga Brahma Gana Sabha	Vani Mahal, T Nagar
-14-Dec-2025	6:30 PM	Ranjani & Gayathri	Vocal; Vani Kala Nipuna L. Ramakrishnan (Violin); Delhi S Sairam (Mrudangam); G.Chandrasekar Sharma (Ghatam)	Ticketed	Thyaga Brahma Gana Sabha	Vani Mahal, T Nagar
 15-Dec-2025	6:30 PM	Lalgudi G.J.R.Krishnan & Lalgudi Vijayalakshmi	Violin Duet; R. Sankaranarayanan (Mrudangam); Sunil Kumar S (Kanjira)	Ticketed	Thyaga Brahma Gana Sabha	Vani Mahal, T Nagar
 16-Dec-2025	6:30 PM	Sikkil C. Gurucharan	Vocal; V. Sanjeev (Violin); Padma Vibhushan Umayalpuram Dr.K.Sivaraman (Mrudangam); B.S.Purushotham (Kanjira)	Ticketed	Thyaga Brahma Gana Sabha	Vani Mahal, T Nagar
 17-Dec-2025	6:30 PM	S.Saketharaman	Vocal; H.N.Bhaskar (Violin); Vani Kala Nipuna N.C.Bharadwaj (Mrudangam); Dr. S Karthick (Ghatam)	Ticketed	Thyaga Brahma Gana Sabha	Vani Mahal, T Nagar
