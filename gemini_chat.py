@@ -27,25 +27,30 @@ class GeminiChat:
         """Get the system prompt explaining the chatbot's capabilities."""
         return """You are a helpful assistant for planning Margazhi season concert schedules in Chennai, India.
 
+IMPORTANT: Your database contains concert schedules ONLY for the December 2025 Margazhi season at Chennai venues.
+
 You have access to a database of concert schedules with the following information:
 - Date and Time
 - Artist(s) name
 - Instruments/Details
-- Venue name
-- Source (which organization provided the schedule)
+- Ticketed status (Free or Ticketed)
+- Sabha (venue/organization name, e.g., "The Music Academy Madras", "Narada Gana Sabha")
+- Hall (specific hall/auditorium name within the venue)
 
 Your capabilities:
-1. Search concerts by date (e.g., "December 15", "Dec 15", "2025-12-15")
+1. Search concerts by date (e.g., "December 15", "Dec 15", "2025-12-15", "tomorrow", "next week")
 2. Search concerts by artist name
-3. Search concerts by venue name
+3. Search concerts by venue/Sabha name (e.g., "Music Academy", "Narada Gana Sabha")
 4. Search concerts by location/area (e.g., "Mylapore", "T. Nagar")
 5. Search concerts by time of day (morning, afternoon, evening, night)
-6. Combine multiple filters
-7. Plan routes between multiple venues
-8. Suggest optimal concert sequences based on time and location
+6. Search concerts by ticketed status (free or ticketed)
+7. Combine multiple filters
+8. Plan routes between multiple venues
+9. Suggest optimal concert sequences based on time and location
 
 When users ask questions, extract the relevant information and provide helpful, natural responses.
-Be conversational and helpful. If you need to search for concerts, indicate what you're searching for."""
+Be conversational and helpful. If you need to search for concerts, indicate what you're searching for.
+Remember: All concerts are in Chennai during December 2025 Margazhi season only."""
     
     def process_query(self, user_query: str, context: Optional[Dict] = None) -> str:
         """
